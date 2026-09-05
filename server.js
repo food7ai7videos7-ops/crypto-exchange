@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const User = require('./models/User'); // User model import kiya
 
 const app = express();
 app.use(express.json());
@@ -18,9 +19,41 @@ mongoose.connect(MONGO_URI, {
     console.log("Database Connection Error: ", err);
 });
 
-// Basic Test Route
+// 1. Test Route
 app.get('/', (req, res) => {
     res.json({ message: "Crypto Exchange Backend is Live and Running smoothly!" });
+});
+
+// 2. User Register Route (Naya account banane ke liye)
+app.post('/api/register', async (req, res) => {
+    try {
+        const { username, email, password } = req.body;
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ error: "Email already registered!" });
+        }
+        const newUser = new User({ username, email, password, walletBalance: 0 });
+        await newUser.save();
+        res.status(201).json({ message: "User registered successfully!", user: newUser });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 3. Deposit USDT Route (Virtual balance barhane ke liye)
+app.post('/api/deposit', async (req, res) => {
+    try {
+        const { userId, amount } = req.body; // amount matlab USDT value
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found!" });
+        }
+        user.walletBalance += Number(amount); // Balance mein deposit add ho jayega
+        await user.save();
+        res.json({ message: "Deposit successful!", newBalance: user.walletBalance });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 const PORT = process.env.PORT || 5000;
