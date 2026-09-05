@@ -57,17 +57,17 @@ app.post('/api/deposit', async (req, res) => {
     }
 });
 
-// 4. Open Trade Route (Custom / Apne hisab se fee set karne ke sath)
+// 4. Open Trade Route (Custom Fee, Target, Stop Loss ke sath)
 app.post('/api/trade/open', async (req, res) => {
     try {
-        const { userId, symbol, type, amount, entryPrice, platformFee = 0 } = req.body;
+        const { userId, symbol, type, amount, entryPrice, platformFee = 0, target = 0, stopLoss = 0 } = req.body;
         
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found!" });
         }
 
-        // Total deduction = Investment + Jo fee aapne apne hisab se set ki hai
+        // Total deduction = Investment + Custom Platform Fee
         const totalDeduction = Number(amount) + Number(platformFee);
 
         // Check karna ke user ke paas balance hai ya nahi
@@ -79,7 +79,7 @@ app.post('/api/trade/open', async (req, res) => {
         user.walletBalance -= totalDeduction;
         await user.save();
 
-        // Nayi trade database mein save karna
+        // Nayi trade database mein save karna (Target aur Stop Loss ke sath)
         const newTrade = new Trade({
             userId,
             symbol,
@@ -87,6 +87,8 @@ app.post('/api/trade/open', async (req, res) => {
             amount,
             entryPrice,
             platformFee: Number(platformFee),
+            target: Number(target),
+            stopLoss: Number(stopLoss),
             status: 'OPEN'
         });
         await newTrade.save();
@@ -102,7 +104,63 @@ app.post('/api/trade/open', async (req, res) => {
     }
 });
 
+// 5. Close Trade Route (Profit / Loss calculate karne aur balance wapas karne ke liye)
+app.post('/api/trade/close', async (req, res) => {
+    try {
+        const { tradeId, exitPrice } = req.body;
+
+        const trade = await Trade.findById(tradeId);
+        if (!trade) {
+            return res.status(404).json({ error: "Trade not found!" });
+        }
+
+        if (trade.status === 'CLOSED') {
+            return res.status(400).json({ error: "Trade is already closed!" });
+        }
+
+        const user = await User.findById(trade.userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found!" });
+        }
+
+        let profitOrLoss = 0;
+        // Agar BUY trade hai
+        if (trade.type === 'BUY') {
+            profitOrLoss = (exitPrice - trade.entryPrice) * (trade.amount / trade.entryPrice);
+        } 
+        // Agar SELL trade hai
+        else if (trade.type === 'SELL') {
+            profitOrLoss = (trade.entryPrice - exitPrice) * (trade.amount / trade.entryPrice);
+        }
+
+        // Final amount jo user ke wallet mein wapas jayegi (Investment + Profit/Loss)
+        const returnAmount = Number(trade.amount) + Number(profitOrLoss);
+
+        // Trade update karna
+        trade.exitPrice = exitPrice;
+        trade.profitOrLoss = profitOrLoss;
+        trade.status = 'CLOSED';
+        await trade.save();
+
+        // User ka wallet balance update karna
+        user.walletBalance += returnAmount;
+        await user.save();
+
+        res.json({
+            message: "Trade closed successfully!",
+            trade,
+            profitOrLoss,
+            newWalletBalance: user.walletBalance
+        });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
